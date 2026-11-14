@@ -65,5 +65,7 @@ jobs:
           git add -f output_epg/*.xml EPG_UPDATE/epg_meogo.xml.gz .ultima_extracao_utc
           if ! git diff --cached --quiet; then
             git commit -m 'Atualizar EPG MEO automaticamente'
+            git fetch origin main
+            git rebase origin/main
             git push origin HEAD:main
           fi
