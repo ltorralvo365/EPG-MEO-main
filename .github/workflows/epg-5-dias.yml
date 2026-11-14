@@ -1,0 +1,107 @@
+name: EPG MEO - a cada 5 dias
+
+on:
+  schedule:
+    - cron: '15 6 * * *'  # Verifica diariamente, executa quando passaram 5 dias
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: epg-meo-atualizacao
+  cancel-in-progress: false
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Obter repositorio e historico
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verificar intervalo de 5 dias
+        id: intervalo
+        shell: bash
+        run: |
+          python - <<'PY'
+          import datetime, os, pathlib
+          path = pathlib.Path('.ultima_extracao_utc')
+          executar = True
+          if os.environ.get('GITHUB_EVENT_NAME') == 'schedule' and path.exists():
+              ultima = datetime.datetime.fromisoformat(path.read_text().strip())
+              if ultima.tzinfo is None:
+                  ultima = ultima.replace(tzinfo=datetime.timezone.utc)
+              executar = datetime.datetime.now(datetime.timezone.utc) - ultima >= datetime.timedelta(days=5)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'executar={str(executar).lower()}\n')
+          print('Executar extracao:', executar)
+          PY
+
+      - name: Extrair e combinar todos os XML
+        if: steps.intervalo.outputs.executar == 'true'
+        run: python epg_meogo_github.py --extrair
+
+      - name: Registar execucao bem sucedida
+        if: steps.intervalo.outputs.executar == 'true'
+        run: |
+          python - <<'PY'
+          import datetime, pathlib
+          pathlib.Path('.ultima_extracao_utc').write_text(datetime.datetime.now(datetime.timezone.utc).isoformat() + '\n')
+          PY
+
+      - name: Guardar XML e GZ no repositorio
+        if: steps.intervalo.outputs.executar == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f output_epg/*.xml EPG_UPDATE/epg_meogo.xml.gz .ultima_extracao_utc
+          if ! git diff --cached --quiet; then
+            git commit -m 'Atualizar EPG MEO automaticamente'
+            git push origin HEAD:main
+          fi
+
+
+      - name: Publicar XML.GZ no EPG-PUBLICO
+        if: steps.intervalo.outputs.executar == 'true'
+        env:
+          PUBLIC_TOKEN: ${{ secrets.EPG_PUBLICO_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PUBLIC_TOKEN" || { echo "Secret EPG_PUBLICO_TOKEN em falta"; exit 1; }
+          test -s EPG_UPDATE/epg_meogo.xml.gz || { echo "Ficheiro GZ em falta"; exit 1; }
+
+          # Autenticacao sem colocar o token no URL nem nos comandos registados.
+          ASKPASS_SCRIPT="$(mktemp)"
+          trap 'rm -f "$ASKPASS_SCRIPT"' EXIT
+          cat > "$ASKPASS_SCRIPT" <<'SH'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$PUBLIC_TOKEN" ;;
+          esac
+          SH
+          chmod 700 "$ASKPASS_SCRIPT"
+          export GIT_ASKPASS="$ASKPASS_SCRIPT"
+          export GIT_TERMINAL_PROMPT=0
+
+          git -c credential.helper= clone --depth 1 https://github.com/mfa20geral-coder/EPG-PUBLICO.git /tmp/epg-publico
+          cp EPG_UPDATE/epg_meogo.xml.gz /tmp/epg-publico/epg_meogo.xml.gz
+          cd /tmp/epg-publico
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add epg_meogo.xml.gz
+          if ! git diff --cached --quiet; then
+            git commit -m 'Atualizar EPG publico automaticamente'
+            git -c credential.helper= push origin HEAD:main
+          else
+            echo 'EPG publico ja esta atualizado.'
+          fi
