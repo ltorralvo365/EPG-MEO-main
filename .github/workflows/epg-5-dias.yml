@@ -57,7 +57,7 @@ jobs:
           pathlib.Path('.ultima_extracao_utc').write_text(datetime.datetime.now(datetime.timezone.utc).isoformat() + '\n')
           PY
 
-      - name: Guardar XML e GZ no repositorio
+      - name: Guardar EPG_UPDATE no repositorio
         if: steps.intervalo.outputs.executar == 'true'
         run: |
           git config user.name 'github-actions[bot]'
@@ -66,42 +66,4 @@ jobs:
           if ! git diff --cached --quiet; then
             git commit -m 'Atualizar EPG MEO automaticamente'
             git push origin HEAD:main
-          fi
-
-
-      - name: Publicar XML.GZ no EPG-PUBLICO
-        if: steps.intervalo.outputs.executar == 'true'
-        env:
-          PUBLIC_TOKEN: ${{ secrets.EPG_PUBLICO_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$PUBLIC_TOKEN" || { echo "Secret EPG_PUBLICO_TOKEN em falta"; exit 1; }
-          test -s EPG_UPDATE/epg_meogo.xml.gz || { echo "Ficheiro GZ em falta"; exit 1; }
-
-          # Autenticacao sem colocar o token no URL nem nos comandos registados.
-          ASKPASS_SCRIPT="$(mktemp)"
-          trap 'rm -f "$ASKPASS_SCRIPT"' EXIT
-          cat > "$ASKPASS_SCRIPT" <<'SH'
-          #!/bin/sh
-          case "$1" in
-            *Username*) printf '%s\n' 'x-access-token' ;;
-            *Password*) printf '%s\n' "$PUBLIC_TOKEN" ;;
-          esac
-          SH
-          chmod 700 "$ASKPASS_SCRIPT"
-          export GIT_ASKPASS="$ASKPASS_SCRIPT"
-          export GIT_TERMINAL_PROMPT=0
-
-          git -c credential.helper= clone --depth 1 https://github.com/mfa20geral-coder/EPG-PUBLICO.git /tmp/epg-publico
-          cp EPG_UPDATE/epg_meogo.xml.gz /tmp/epg-publico/epg_meogo.xml.gz
-          cd /tmp/epg-publico
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add epg_meogo.xml.gz
-          if ! git diff --cached --quiet; then
-            git commit -m 'Atualizar EPG publico automaticamente'
-            git -c credential.helper= push origin HEAD:main
-          else
-            echo 'EPG publico ja esta atualizado.'
           fi
