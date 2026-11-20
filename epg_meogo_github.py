@@ -45,7 +45,7 @@ MEO_TO_TVG.update({
     'LOLLY': 'LOLLY',
     'KANUCA': 'KANUCA',
     'VOD': 'VOD',
-    'BIGGS': 'BIGGS',
+    'VINTV': 'VINTV',
     'DEST': 'DEST',
     'MTVPHD': 'MTVPHD',
     'FIGHTSP': 'FIGHTSP',
